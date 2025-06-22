@@ -3,6 +3,7 @@ import logging
 from flask import Flask
 from extensions import db, login_manager
 from werkzeug.middleware.proxy_fix import ProxyFix
+import models
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -24,7 +25,7 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 # Initialize extensions
 db.init_app(app)
 login_manager.init_app(app)
-login_manager.login_view = 'login'
+login_manager.login_view = 'main.login'  # Updated for blueprint
 login_manager.login_message = 'Please log in to access this page.'
 login_manager.login_message_category = 'info'
 
@@ -34,9 +35,11 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 with app.app_context():
-    import models
     db.create_all()
-    import routes
+
+# Register blueprint
+from routes import main_bp
+app.register_blueprint(main_bp)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,24 +1,27 @@
 import json
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
-from flask import render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash
-from app import app, db
+from extensions import db  # Import from extensions instead of app
 from models import User, Conversation, JournalEntry
 from ml_utils import emotion_detector
 
+# Create blueprint
+main_bp = Blueprint('main', __name__)
+
 # Authentication routes
-@app.route('/')
+@main_bp.route('/')
 def index():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+        return redirect(url_for('main.dashboard'))
+    return redirect(url_for('main.login'))
 
-@app.route('/login', methods=['GET', 'POST'])
+@main_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('main.dashboard'))
     
     if request.method == 'POST':
         email = request.form.get('email')
@@ -33,16 +36,16 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             flash(f'Welcome back, {user.full_name}!', 'success')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('main.dashboard'))
         else:
             flash('Invalid email or password.', 'error')
     
     return render_template('login.html')
 
-@app.route('/register', methods=['GET', 'POST'])
+@main_bp.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('main.dashboard'))
     
     if request.method == 'POST':
         full_name = request.form.get('full_name', '').strip()
@@ -75,24 +78,24 @@ def register():
             
             login_user(user)
             flash('Account created successfully! Welcome to Mental Wellness.', 'success')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('main.dashboard'))
             
         except Exception as e:
             db.session.rollback()
             flash('An error occurred while creating your account. Please try again.', 'error')
-            app.logger.error(f"Registration error: {str(e)}")
+            current_app.logger.error(f"Registration error: {str(e)}")
     
     return render_template('register.html')
 
-@app.route('/logout')
+@main_bp.route('/logout')
 @login_required
 def logout():
     logout_user()
     flash('You have been logged out successfully.', 'info')
-    return redirect(url_for('login'))
+    return redirect(url_for('main.login'))
 
 # Main application routes
-@app.route('/dashboard')
+@main_bp.route('/dashboard')
 @login_required
 def dashboard():
     # Get summary statistics
@@ -147,13 +150,13 @@ def dashboard():
                          recent_conversations=recent_conversations,
                          recent_journals=recent_journals)
 
-@app.route('/chat')
+@main_bp.route('/chat')
 @login_required
 def chat():
     conversations = Conversation.query.filter_by(user_id=current_user.id).order_by(Conversation.timestamp.asc()).all()
     return render_template('chat.html', conversations=conversations)
 
-@app.route('/send_message', methods=['POST'])
+@main_bp.route('/send_message', methods=['POST'])
 @login_required
 def send_message():
     # Handle both form data and JSON requests
@@ -167,7 +170,7 @@ def send_message():
         if request.headers.get('Content-Type') == 'application/json' or request.is_json:
             return jsonify({'error': 'Please enter a message'}), 400
         flash('Please enter a message.', 'error')
-        return redirect(url_for('chat'))
+        return redirect(url_for('main.chat'))
     
     try:
         # Analyze user message
@@ -216,12 +219,12 @@ def send_message():
         
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f"Error saving conversation: {str(e)}")
+        current_app.logger.error(f"Error saving conversation: {str(e)}")
         if request.headers.get('Content-Type') == 'application/json' or request.is_json:
             return jsonify({'error': 'An error occurred while processing your message'}), 500
         flash('An error occurred while processing your message.', 'error')
     
-    return redirect(url_for('chat'))
+    return redirect(url_for('main.chat'))
 
 def generate_bot_response(emotion, sentiment, message):
     """Generate contextual bot responses based on emotion and sentiment"""
@@ -292,13 +295,13 @@ def generate_bot_response(emotion, sentiment, message):
     import random
     return random.choice(emotion_responses)
 
-@app.route('/journal')
+@main_bp.route('/journal')
 @login_required
 def journal():
     entries = JournalEntry.query.filter_by(user_id=current_user.id).order_by(JournalEntry.created_at.desc()).all()
     return render_template('journal.html', entries=entries)
 
-@app.route('/journal/new', methods=['GET', 'POST'])
+@main_bp.route('/journal/new', methods=['GET', 'POST'])
 @login_required
 def new_journal_entry():
     if request.method == 'POST':
@@ -328,33 +331,33 @@ def new_journal_entry():
             db.session.commit()
             
             flash('Journal entry saved successfully!', 'success')
-            return redirect(url_for('journal'))
+            return redirect(url_for('main.journal'))
             
         except Exception as e:
             db.session.rollback()
-            app.logger.error(f"Error saving journal entry: {str(e)}")
+            current_app.logger.error(f"Error saving journal entry: {str(e)}")
             flash('An error occurred while saving your entry.', 'error')
     
     return render_template('journal_entry.html')
 
-@app.route('/journal/<int:entry_id>')
+@main_bp.route('/journal/<int:entry_id>')
 @login_required
 def view_journal_entry(entry_id):
     entry = JournalEntry.query.filter_by(id=entry_id, user_id=current_user.id).first_or_404()
     return render_template('journal_view.html', entry=entry)
 
-@app.route('/analytics')
+@main_bp.route('/analytics')
 @login_required
 def analytics():
     return render_template('analytics.html')
 
-@app.route('/resources')
+@main_bp.route('/resources')
 @login_required
 def resources():
     return render_template('resources.html')
 
 # Analytics API endpoints
-@app.route('/api/analytics/emotion-distribution')
+@main_bp.route('/api/analytics/emotion-distribution')
 @login_required
 def emotion_distribution():
     days = request.args.get('days', 30, type=int)
@@ -378,7 +381,7 @@ def emotion_distribution():
     
     return jsonify(distribution)
 
-@app.route('/api/analytics/emotion-frequency')
+@main_bp.route('/api/analytics/emotion-frequency')
 @login_required
 def emotion_frequency():
     days = request.args.get('days', 30, type=int)
@@ -394,7 +397,7 @@ def emotion_frequency():
     emotion_counts = Counter([e[0] for e in emotions])
     return jsonify(dict(emotion_counts))
 
-@app.route('/api/analytics/emotion-trends')
+@main_bp.route('/api/analytics/emotion-trends')
 @login_required
 def emotion_trends():
     days = request.args.get('days', 30, type=int)
@@ -426,7 +429,7 @@ def emotion_trends():
     
     return jsonify(trends)
 
-@app.route('/api/analytics/emotional-balance')
+@main_bp.route('/api/analytics/emotional-balance')
 @login_required
 def emotional_balance():
     days = request.args.get('days', 30, type=int)
@@ -450,7 +453,7 @@ def emotional_balance():
     
     return jsonify(balance)
 
-@app.route('/api/analytics/sentiment-trends')
+@main_bp.route('/api/analytics/sentiment-trends')
 @login_required
 def sentiment_trends():
     days = request.args.get('days', 30, type=int)
@@ -480,7 +483,7 @@ def sentiment_trends():
     
     return jsonify(trends)
 
-@app.route('/api/analytics/daily-mood')
+@main_bp.route('/api/analytics/daily-mood')
 @login_required
 def daily_mood():
     days = request.args.get('days', 30, type=int)
@@ -524,7 +527,7 @@ def daily_mood():
     
     return jsonify(heatmap_data)
 
-@app.route('/api/analytics/summary')
+@main_bp.route('/api/analytics/summary')
 @login_required
 def analytics_summary():
     days = request.args.get('days', 30, type=int)
